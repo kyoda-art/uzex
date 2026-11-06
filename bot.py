@@ -196,9 +196,14 @@ async def _send(target, text: str, lang: str, markup=None, rich: bool = False):
         )
 
 
-def _year_markup(ds, tool: str | None, selected, lang: str):
-    """Ma'lumot xabari tagida yil tugmalari. Tanlangan yil ✅ bilan belgilanadi."""
-    if not tool or tool not in PREV_TOOLS or not ds.years:
+def _year_markup(ds, tool: str | None, selected, lang: str, allow_any: bool = False):
+    """Ma'lumot xabari tagida yil tugmalari. Tanlangan yil ✅ bilan belgilanadi.
+
+    allow_any=True — vosita PREV_TOOLS da bo'lmasa ham tugmalar chiqadi (modul uchun).
+    """
+    if not ds.years:
+        return None
+    if not allow_any and (not tool or tool not in PREV_TOOLS):
         return None
     row = []
     for y in ds.years:
@@ -213,6 +218,11 @@ def _year_markup(ds, tool: str | None, selected, lang: str):
 def _wants_file(text: str) -> bool:
     t = text.lower()
     return any(w in t for w in FILE_WORDS)
+
+
+def _module_has_year(module: str) -> bool:
+    """Bo'limdagi vositalardan kamida bittasi yil bo'yicha filtrlanadimi."""
+    return any(tool in PREV_TOOLS for tool, _ in MODULE_PLAN[module])
 
 
 async def _send_chart(update_or_msg, ds, res: dict, lang: str):
@@ -255,23 +265,32 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _send(update, TEXT[lang]["welcome"], lang)
 
 
-async def run_module(update: Update, context: ContextTypes.DEFAULT_TYPE, module: str):
+async def run_module(update: Update, context: ContextTypes.DEFAULT_TYPE, module: str, year: int | None = None):
+    """Menyudagi bo'lim: bir yoki bir nechta vositani ishlatib, matn + grafik yuboradi.
+
+    year berilsa — barcha vositalar shu yil uchun qayta hisoblanadi (yil tugmalari uchun).
+    """
     lang = _ui(context)
     ds = context.application.bot_data.get("ds")
+    msg = update.message or (update.callback_query.message if update.callback_query else None)
     if ds is None:
-        await _send(update, TEXT[lang]["loading"], lang)
+        await _send(msg, TEXT[lang]["loading"], lang)
         return
-    await update.message.reply_text(TEXT[lang]["busy"])
-    blocks, last_tool, last_args = [], None, {}
+    await msg.reply_text(TEXT[lang]["busy"])
+    blocks, charts = [], []
     for tool, args in MODULE_PLAN[module]:
-        result = await asyncio.to_thread(run_tool, ds, tool, args)
+        a = dict(args)
+        if year is not None:
+            a["year"] = year
+        result = await asyncio.to_thread(run_tool, ds, tool, a)
         blocks.append(format_result(tool, result, lang, rich=True))
-        last_tool, last_args = tool, args
-    markup = None
-    if len(MODULE_PLAN[module]) == 1:
-        context.user_data["last"] = {"tool": last_tool, "args": last_args}
-        markup = _year_markup(ds, last_tool, last_args.get("year"), lang)
-    await _send(update, "\n\n".join(blocks), lang, markup=markup, rich=True)
+        charts.append((tool, result))
+    context.user_data["last"] = {"module": module, "year": year}
+    # Yil tugmalari faqat yil bo'yicha filtrlanadigan vositalar bo'lsa chiqadi
+    markup = _year_markup(ds, None, year, lang, allow_any=True) if _module_has_year(module) else None
+    await _send(msg, "\n\n".join(blocks), lang, markup=markup, rich=True)
+    for tool, result in charts:
+        await _send_chart(msg, ds, {"tool": tool, "result": result}, lang)
 
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -359,6 +378,12 @@ async def on_year(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     year = int(query.data.split(":")[1])
     last = context.user_data.get("last") or {"tool": "summary", "args": {}}
+
+    # Menyudan ochilgan bo'lim bo'lsa — butun bo'lim shu yil uchun qayta hisoblanadi
+    if "module" in last:
+        await run_module(update, context, last["module"], year=year)
+        return
+
     args = dict(last["args"])
     args["year"] = year
     result = await asyncio.to_thread(run_tool, ds, last["tool"], args)

@@ -50,6 +50,9 @@ TITLES = {
 # Karta (2-3 qatorli blok) ko'rinishida chiqadigan vositalar — nomlari uzun bo'lganlar
 CARD_TOOLS = {"anomalies", "risky_sellers"}
 
+# Juftlik ko'rinishi: "sotuvchi → xaridor" nomli qatorlar (karta bilan bir xil, faqat teskari tartibda)
+PAIR_TOOLS = {"trade_network"}
+
 # Karta sarlavhasi: (emoji, sarlavha, izoh-shablon). Izoh meta ma'lumotidan to'ldiriladi.
 HEADERS = {
     "anomalies": {
@@ -228,6 +231,46 @@ def _card_block(tool: str, rows: list, meta: dict, lang: str, rich: bool) -> lis
     return out
 
 
+def _pair_block(tool: str, rows: list, result: dict, lang: str, rich: bool) -> list[str]:
+    """Savdo juftliklari: birinchi qatorda hajm, tagida "sotuvchi → xaridor"."""
+    title = title_text(tool, result, lang)
+    out = [f"<b>{_esc(title)}</b>" if rich else title, ""]
+    for i, r in enumerate(rows, 1):
+        name = str(r.get("name") or "")
+        val = fmt_value(r.get("value"), r.get("vtype", "uzs"), r.get("cur"), lang)
+        if rich:
+            out.append(f"{i}. <b>{_esc(val)}</b>")
+            out.append(f"↳ <i>{_esc(name)}</i>")
+        else:
+            out.append(f"{i}. {name} — {val}")
+        out.append("")
+    while out and out[-1] == "":
+        out.pop()
+    return out
+
+
+def _forecast_block(rows: list, result: dict, lang: str) -> list[str]:
+    """Prognozni ustunlari tekislangan jadval (monospace <pre>) ko'rinishida beradi."""
+    title = title_text("forecast", result, lang)
+    unit = "mlrd so'm" if lang == "uz" else "млрд сум"
+    c_month = "Oy" if lang == "uz" else "Месяц"
+    c_state = "Holat" if lang == "uz" else "Статус"
+
+    table = [f"{c_month:<8}{unit:>12}  {c_state}", "─" * 28]
+    for r in rows:
+        v = r.get("value")
+        if v is None:
+            num = "—"
+        elif abs(v) >= 1e9:
+            num = _sp(f"{v / 1e9:,.2f}")
+        else:
+            num = _sp(f"{v:,.0f}")
+        state = LABELS[lang].get(r.get("tag"), "") if r.get("tag") else ""
+        table.append(f"{str(r.get('name') or ''):<8}{num:>12}  {state}")
+
+    return [f"<b>{_esc(title)}</b>", "", "<pre>" + _esc("\n".join(table)) + "</pre>"]
+
+
 def format_result(tool: str, result: dict, lang: str, rich: bool = False) -> str:
     """Natijani matnga aylantiradi.
 
@@ -241,6 +284,10 @@ def format_result(tool: str, result: dict, lang: str, rich: bool = False) -> str
     meta = result.get("meta") or {}
     if tool in CARD_TOOLS:
         out = _card_block(tool, rows, meta, lang, rich)
+    elif tool in PAIR_TOOLS:
+        out = _pair_block(tool, rows, result, lang, rich)
+    elif tool == "forecast" and rich:
+        out = _forecast_block(rows, result, lang)
     else:
         out = _list_block(tool, rows, result, lang, rich)
 
