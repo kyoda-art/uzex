@@ -198,7 +198,23 @@ def main():
     app.bot_data["llm"] = llm
     app.add_handler(CommandHandler(["start", "menu"], cmd_start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
-    app.run_polling()
+    # Render Web Service (bepul tarif): PORT va RENDER_EXTERNAL_URL avtomatik beriladi.
+    # Webhook rejimida Telegram xabarni servisga yuboradi, servis uxlagan bo'lsa ham uyg'onadi.
+    port = os.environ.get("PORT")
+    base_url = os.environ.get("RENDER_EXTERNAL_URL")
+    if port and base_url:
+        log.info("Webhook rejimi: %s", base_url)
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=int(port),
+            url_path=token,
+            webhook_url=f"{base_url}/{token}",
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+        )
+    else:
+        log.info("Polling rejimi (mahalliy)")
+        app.run_polling()
 
 
 if __name__ == "__main__":

@@ -1,19 +1,19 @@
-# Render Blueprint: bot "worker" sifatida ishlaydi (polling), veb-port kerak emas.
+# Render Blueprint: bot bepul Web Service sifatida ishlaydi (webhook rejimi).
 services:
-  - type: worker
+  - type: web
     name: uzex-bot
     runtime: python
-    plan: starter            # 512 MB RAM — bot ~290 MB sarflaydi
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.8"
       - key: TELEGRAM_BOT_TOKEN
-        sync: false          # Render dashboard'da qo'lda kiritiladi
+        sync: false
       - key: GEMINI_API_KEY
-        sync: false          # kalit kelganda shu yerga qo'shiladi
+        sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
       - key: DATA_URL
-        sync: false          # ma'lumot zip manzili (GitHub Release asset)
+        sync: false

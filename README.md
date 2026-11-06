@@ -70,7 +70,7 @@ git push -u origin main
   - `GEMINI_API_KEY` — ixtiyoriy; kalit bo'lmasa qoidalar rejimi ishlaydi
 - Deploy. Birinchi ishga tushishda ma'lumot yuklab olinadi (bir necha soniya).
 
-Bot "Background Worker" sifatida ishlaydi (polling), shuning uchun domen yoki port kerak emas. Render Starter tarifi pullik.
+Bot bepul **Web Service** sifatida ishlaydi (webhook rejimi). Render `PORT` va `RENDER_EXTERNAL_URL` ni o'zi beradi, bot Telegram'ga shu manzilni ro'yxatdan o'tkazadi. Bepul servis bo'sh turganda uxlaydi, lekin xabar kelganda uyg'onadi (birinchi javob bir necha soniya kechikishi mumkin).
 
 ## Gemini haqida
 
