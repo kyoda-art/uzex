@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 
 from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
@@ -49,6 +50,11 @@ ACTION_BY_LABEL = {
     "🔄 Главное меню": "menu",
 }
 
+GREETINGS = {
+    "salom", "assalomu alaykum", "assalomu alaykum!", "salom alik", "hello", "hi", "privet",
+    "привет", "здравствуйте", "здравствуй", "салом", "ассалому алейкум", "qalaysiz", "qalesiz",
+}
+
 # Har bir bo'lim qaysi vositalarni ishga tushirishi
 MODULE_PLAN = {
     "market": [("summary", {})],
@@ -78,6 +84,7 @@ TEXT = {
         ),
         "lang_switched": "🌍 Til o'zgartirildi: O'zbekcha",
         "busy": "⏳ Hisoblanmoqda...",
+        "loading": "⏳ Birja ma'lumotlari yuklanmoqda, bir necha daqiqa kuting va qayta yozing.",
         "error": "Xatolik yuz berdi. Iltimos, qayta urinib ko'ring.",
     },
     "ru": {
@@ -99,6 +106,7 @@ TEXT = {
         ),
         "lang_switched": "🌍 Язык изменён: Русский",
         "busy": "⏳ Считаю...",
+        "loading": "⏳ Данные биржи загружаются, подождите пару минут и напишите снова.",
         "error": "Произошла ошибка. Попробуйте ещё раз.",
     },
 }
@@ -136,8 +144,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def run_module(update: Update, context: ContextTypes.DEFAULT_TYPE, module: str):
-    ds = context.application.bot_data["ds"]
     lang = _ui(context)
+    ds = context.application.bot_data.get("ds")
+    if ds is None:
+        await _send(update, TEXT[lang]["loading"], lang)
+        return
     await update.message.reply_text(TEXT[lang]["busy"])
     blocks = []
     for tool, args in MODULE_PLAN[module]:
@@ -171,15 +182,25 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _send(update, TEXT[_ui(context)]["error"], _ui(context))
         return
 
-    ds = context.application.bot_data["ds"]
-    llm = context.application.bot_data.get("llm")
     lang = detect_lang(text)  # javob savol tilida
+    if text.lower().strip(" !.,") in GREETINGS:
+        await _send(update, TEXT[lang]["welcome"], lang)
+        return
+    ds = context.application.bot_data.get("ds")
+    if ds is None:
+        await _send(update, TEXT[lang]["loading"], lang)
+        return
+    llm = context.application.bot_data.get("llm")
+    history = context.user_data.setdefault("history", [])
     await update.message.chat.send_action("typing")
     try:
-        reply = await asyncio.to_thread(answer, ds, text, llm)
+        reply = await asyncio.to_thread(answer, ds, text, llm, list(history))
     except Exception:
         log.exception("Savolga javob berishda xato: %r", text)
         reply = TEXT[lang]["error"]
+    history.append(("user", text))
+    history.append(("agent", reply))
+    del history[:-10]  # oxirgi 10 ta xabar
     await _send(update, reply, lang)
 
 
@@ -188,14 +209,21 @@ def main():
     if not token:
         raise SystemExit("TELEGRAM_BOT_TOKEN o'rnatilmagan")
 
-    log.info("Birja ma'lumotlari yuklanmoqda...")
-    ds = load()
-    llm = make_llm()
-    log.info("Bitimlar: %d, Gemini: %s", len(ds.deals), "ulangan" if llm else "yo'q (qoidalar rejimi)")
-
     app = Application.builder().token(token).build()
-    app.bot_data["ds"] = ds
-    app.bot_data["llm"] = llm
+    app.bot_data["ds"] = None
+    app.bot_data["llm"] = make_llm()
+    log.info("Gemini: %s", "ulangan" if app.bot_data["llm"] else "yo'q (qoidalar rejimi)")
+
+    # Ma'lumot fonda yuklanadi: port darhol ochiladi (Render port kutadi)
+    def _load_data():
+        try:
+            log.info("Birja ma'lumotlari yuklanmoqda...")
+            app.bot_data["ds"] = load()
+            log.info("Bitimlar tayyor: %d", len(app.bot_data["ds"].deals))
+        except Exception:
+            log.exception("Ma'lumot yuklanmadi")
+
+    threading.Thread(target=_load_data, daemon=True).start()
     app.add_handler(CommandHandler(["start", "menu"], cmd_start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     # Render Web Service (bepul tarif): PORT va RENDER_EXTERNAL_URL avtomatik beriladi.

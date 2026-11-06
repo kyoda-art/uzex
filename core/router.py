@@ -192,7 +192,42 @@ def make_llm():
     return genai.Client(api_key=key)
 
 
-def answer(ds: Dataset, text: str, llm=None) -> str:
+CHAT_SYSTEM = """Sen UZEX birja bo'yicha AI-agentsan va oddiy suhbat ham qila olasan.
+Foydalanuvchi bilan do'stona, qisqa va aniq gaplash. Foydalanuvchi qaysi tilda yozsa, o'sha tilda javob ber
+(o'zbekcha lotin, kirill yoki ruscha).
+Birja raqamlari, narxlar, hajmlar va sotuvchilar haqida o'zing raqam o'ylab topma. Agar foydalanuvchi shunday
+ma'lumot so'rasa, aniq savol berishini so'ra (masalan: "2025 yilda eng yirik sotuvchilar" yoki "paxta narxi 2026")."""
+
+CHAT_FALLBACK = {
+    "uz": "Hozircha bu savolga javob bera olmayman. Birja bo'yicha savol bering, masalan: "
+          "\"Umumiy statistika 2025\" yoki \"Dollar kursi 30.10.2026\".",
+    "ru": "Пока не могу ответить на этот вопрос. Задайте вопрос о бирже, например: "
+          "\"Общая статистика 2025\" или \"Курс доллара 30.10.2026\".",
+}
+
+
+def chat_reply(llm, text: str, lang: str, history=None) -> str:
+    """Oddiy suhbat javobi (Gemini). Raqamlar uchun bu funksiya ishlatilmaydi."""
+    from google.genai import types
+
+    transcript = ""
+    for role, msg in (history or [])[-8:]:
+        transcript += f"{'Foydalanuvchi' if role == 'user' else 'Agent'}: {msg}\n"
+    prompt = transcript + f"Foydalanuvchi: {text}\nAgent:"
+    resp = llm.models.generate_content(
+        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        contents=prompt,
+        config=types.GenerateContentConfig(system_instruction=CHAT_SYSTEM, temperature=0.7),
+    )
+    out = (resp.text or "").strip()
+    return out or CHAT_FALLBACK[lang]
+
+
+def chat_enabled() -> bool:
+    return os.getenv("CHAT_ENABLED", "1").lower() not in ("0", "false", "no", "off")
+
+
+def answer(ds: Dataset, text: str, llm=None, history=None) -> str:
     lang = detect_lang(text)
     tool, args = None, {}
     if llm is not None:
@@ -204,7 +239,14 @@ def answer(ds: Dataset, text: str, llm=None) -> str:
     else:
         tool, args = route_rules(text, ds)
 
-    if not tool:
-        return NO_DATA[lang]
-    result = run_tool(ds, tool, args)
-    return format_result(tool, result, lang)
+    if tool:
+        result = run_tool(ds, tool, args)
+        return format_result(tool, result, lang)
+
+    # Birja vositasi topilmadi: suhbat rejimi (Gemini bo'lsa) yoki yordam matni
+    if chat_enabled() and llm is not None:
+        try:
+            return chat_reply(llm, text, lang, history)
+        except Exception:
+            log.exception("Suhbat javobida xato")
+    return CHAT_FALLBACK[lang]
