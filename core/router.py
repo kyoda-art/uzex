@@ -59,11 +59,28 @@ def _clean(args: dict, ds: Dataset) -> dict:
     return out
 
 
+def _sources(tool: str, args: dict) -> list:
+    if tool == "usd_rate":
+        return ["usd_rates.csv"]
+    year = args.get("year")
+    files = [f"deals_{year}.csv" if year else "deals_2022–2026.csv", "usd_rates.csv"]
+    if tool in ("top_sellers", "top_buyers", "trade_network", "risky_sellers"):
+        files.append("participants.csv")
+    if tool == "top_brokers":
+        files.append("brokers.csv")
+    if tool in ("price_trend", "anomalies"):
+        files.append("contracts.csv")
+    return files
+
+
 def run_tool(ds: Dataset, tool: str, args: dict) -> dict:
     fn = TOOLS[tool]["fn"]
     allowed = inspect.signature(fn).parameters
-    kwargs = {k: v for k, v in _clean(args or {}, ds).items() if k in allowed and k != "ds"}
-    return fn(ds, **kwargs)
+    clean = _clean(args or {}, ds)
+    kwargs = {k: v for k, v in clean.items() if k in allowed and k != "ds"}
+    result = fn(ds, **kwargs)
+    result.setdefault("meta", {})["sources"] = _sources(tool, clean)
+    return result
 
 
 # ---------- Qoidalarga asoslangan yo'naltirish ----------
@@ -227,26 +244,32 @@ def chat_enabled() -> bool:
     return os.getenv("CHAT_ENABLED", "1").lower() not in ("0", "false", "no", "off")
 
 
-def answer(ds: Dataset, text: str, llm=None, history=None) -> str:
-    lang = detect_lang(text)
-    tool, args = None, {}
+def resolve(ds: Dataset, text: str, llm=None):
+    """Savolni (vosita, parametrlar) juftligiga aylantiradi. Gemini xato bersa qoidalarga o'tadi."""
     if llm is not None:
         try:
-            tool, args = route_llm(llm, text, ds)
+            return route_llm(llm, text, ds)
         except Exception:
             log.exception("Gemini yo'naltirishda xato, qoidalar ishlatiladi")
-            tool, args = route_rules(text, ds)
-    else:
-        tool, args = route_rules(text, ds)
+    return route_rules(text, ds)
 
+
+def run_question(ds: Dataset, text: str, llm=None, history=None) -> dict:
+    """Bitta savolni to'liq qayta ishlaydi: matn, vosita, parametrlar va natija."""
+    lang = detect_lang(text)
+    tool, args = resolve(ds, text, llm)
     if tool:
         result = run_tool(ds, tool, args)
-        return format_result(tool, result, lang)
-
-    # Birja vositasi topilmadi: suhbat rejimi (Gemini bo'lsa) yoki yordam matni
+        return {"text": format_result(tool, result, lang), "tool": tool, "args": args,
+                "result": result, "lang": lang}
     if chat_enabled() and llm is not None:
         try:
-            return chat_reply(llm, text, lang, history)
+            reply = chat_reply(llm, text, lang, history)
+            return {"text": reply, "tool": None, "args": {}, "result": None, "lang": lang}
         except Exception:
             log.exception("Suhbat javobida xato")
-    return CHAT_FALLBACK[lang]
+    return {"text": CHAT_FALLBACK[lang], "tool": None, "args": {}, "result": None, "lang": lang}
+
+
+def answer(ds: Dataset, text: str, llm=None, history=None) -> str:
+    return run_question(ds, text, llm, history)["text"]
