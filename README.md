@@ -18,7 +18,7 @@ Erkin savollar ham ishlaydi: "Хлопок narxi 2025", "Dollar kursi 30.10.2026
 
 **Qoidalar:**
 - Raqamlar faqat CSV ma'lumotidan pandas bilan hisoblanadi — model raqam o'ylab topmaydi.
-- Ma'lumotda javob bo'lmasa: "Ma'lumotda javob yo'q".
+- Birja ma'lumotlari bo'lmagan savollarga: `CHAT_ENABLED=1` bo'lsa (standart) Gemini oddiy suhbat javobini beradi; `CHAT_ENABLED=0` bo'lsa yordam matni chiqadi. Hackathon qat'iy qoidasi uchun `CHAT_ENABLED=0` ni qo'ying.
 - Savol qaysi tilda bo'lsa, javob o'sha tilda (o'zbekcha yoki ruscha).
 - Eksport bitimlari (USD) bitim kunidagi kurs bo'yicha so'mga o'tkaziladi.
 - Annulyatsiyalangan va imzolanmagan bitimlar tahlildan chiqariladi.

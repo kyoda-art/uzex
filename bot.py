@@ -191,12 +191,16 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _send(update, TEXT[lang]["loading"], lang)
         return
     llm = context.application.bot_data.get("llm")
+    history = context.user_data.setdefault("history", [])
     await update.message.chat.send_action("typing")
     try:
-        reply = await asyncio.to_thread(answer, ds, text, llm)
+        reply = await asyncio.to_thread(answer, ds, text, llm, list(history))
     except Exception:
         log.exception("Savolga javob berishda xato: %r", text)
         reply = TEXT[lang]["error"]
+    history.append(("user", text))
+    history.append(("agent", reply))
+    del history[:-10]  # oxirgi 10 ta xabar
     await _send(update, reply, lang)
 
 
