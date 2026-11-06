@@ -1,6 +1,11 @@
-"""Natijalarni tanlangan tilda matnga aylantirish. Raqamlar faqat ma'lumotdan olinadi."""
+"""Natijalarni tanlangan tilda matnga aylantirish. Raqamlar faqat ma'lumotdan olinadi.
+
+`format_result(..., rich=True)` bo'lsa matnga Telegram HTML teglari (<b>, <i>) qo'shiladi —
+bot uni parse_mode="HTML" bilan yuboradi. cli.py rich=False oladi va oddiy matn ko'radi.
+"""
 from __future__ import annotations
 
+import html
 import math
 import re
 
@@ -42,6 +47,32 @@ TITLES = {
     "usd_rate": {"uz": "💵 Dollar kursi", "ru": "💵 Курс доллара"},
 }
 
+# Karta (2-3 qatorli blok) ko'rinishida chiqadigan vositalar — nomlari uzun bo'lganlar
+CARD_TOOLS = {"anomalies", "risky_sellers"}
+
+# Karta sarlavhasi: (emoji, sarlavha, izoh-shablon). Izoh meta ma'lumotidan to'ldiriladi.
+HEADERS = {
+    "anomalies": {
+        "uz": ("🔎", "Anomal bitimlar", "jami {count} ta"),
+        "ru": ("🔎", "Аномальные сделки", "всего {count}"),
+    },
+    "risky_sellers": {
+        "uz": ("⚠️", "Annulyatsiya ulushi yuqori sotuvchilar", "kamida {min_deals} ta bitim"),
+        "ru": ("⚠️", "Продавцы с высокой долей аннулирования", "не менее {min_deals} сделок"),
+    },
+}
+
+HINTS = {
+    "anomalies": {
+        "uz": "medianadan keskin chetlashgan bitimlar",
+        "ru": "сделки с резким отклонением от медианы",
+    },
+    "risky_sellers": {
+        "uz": "annulyatsiya (bekor qilingan) bitimlar ulushi bo'yicha",
+        "ru": "по доле аннулированных сделок",
+    },
+}
+
 
 class _SafeDict(dict):
     def __missing__(self, key):
@@ -59,6 +90,16 @@ def detect_lang(text: str) -> str:
 
 def _sp(s: str) -> str:
     return s.replace(",", " ")
+
+
+def _esc(v) -> str:
+    """HTML uchun xavfsiz matn (& < > belgilaridan himoya)."""
+    return html.escape(str(v), quote=False)
+
+
+def _dev(v: float) -> str:
+    """0.34 -> '34%' — yo'nalish strelka bilan ko'rsatiladi, shuning uchun ishorasiz."""
+    return f"{abs(v) * 100:.0f}%"
 
 
 def fmt_value(v, vtype: str, cur: str | None, lang: str) -> str:
@@ -91,28 +132,121 @@ def title_text(tool: str, result: dict, lang: str) -> str:
     return TITLES[tool][lang].format_map(meta)
 
 
-def format_result(tool: str, result: dict, lang: str) -> str:
-    rows = result.get("rows") or []
-    if not rows:
-        return NO_DATA[lang]
-    title = title_text(tool, result, lang)
+# ---------- Oddiy ro'yxat ko'rinishi ----------
 
-    out = [title, ""]
+def _list_block(tool: str, rows: list, result: dict, lang: str, rich: bool) -> list[str]:
+    title = title_text(tool, result, lang)
+    out = [f"<b>{_esc(title)}</b>" if rich else title, ""]
     for i, r in enumerate(rows, 1):
         if r.get("name") is not None:
             left = str(r["name"])
         else:
             left = LABELS[lang].get(r.get("label"), "")
         prefix = "• " if tool == "summary" else f"{i}. "
+        val = fmt_value(r.get("value"), r.get("vtype", "text"), r.get("cur"), lang)
+        if rich:
+            left, val = _esc(left), f"<b>{_esc(val)}</b>"
         line = prefix + left
         if r.get("code"):
-            line += f" · {r['code']}"
-        line += " — " + fmt_value(r.get("value"), r.get("vtype", "text"), r.get("cur"), lang)
+            line += " · " + (_esc(r["code"]) if rich else str(r["code"]))
+        line += " — " + val
         if r.get("tag"):
-            line += f" ({LABELS[lang].get(r['tag'], r['tag'])})"
+            tag = LABELS[lang].get(r["tag"], r["tag"])
+            line += f" ({_esc(tag) if rich else tag})"
         out.append(line)
-    sources = (result.get("meta") or {}).get("sources")
-    if sources:
+    return out
+
+
+# ---------- Karta ko'rinishi (anomal bitimlar, riskli sotuvchilar) ----------
+
+def _anomaly_card(i: int, r: dict, lang: str, rich: bool) -> list[str]:
+    """Bitta bitim: sarlavha qatori (og'ish · sana · №) + mahsulot nomi alohida qatorda."""
+    parts = [p.strip() for p in str(r.get("name") or "").split(" · ", 2)]
+    date = parts[0] if len(parts) > 0 else ""
+    deal = parts[1] if len(parts) > 1 else ""
+    product = parts[2] if len(parts) > 2 else ""
+
+    v = r.get("value")
+    if isinstance(v, (int, float)) and not (isinstance(v, float) and math.isnan(v)):
+        arrow, pct = ("⬇️" if v < 0 else "⬆️"), _dev(float(v))
+    else:
+        arrow, pct = "•", "—"
+
+    head = f"{i}. {arrow} " + (f"<b>{pct}</b>" if rich else pct)
+    extra = " · ".join(x for x in (date, deal) if x)
+    if extra:
+        head += " · " + (_esc(extra) if rich else extra)
+
+    lines = [head]
+    if product:
+        lines.append(f"↳ <i>{_esc(product)}</i>" if rich else f"↳ {product}")
+    return lines
+
+
+def _risky_card(i: int, r: dict, lang: str, rich: bool) -> list[str]:
+    """Bitta sotuvchi: annulyatsiya ulushi · nomi, tagida INN."""
+    name = str(r.get("name") or "")
+    code = str(r.get("code") or "")
+    pct = fmt_value(r.get("value"), "pct", None, lang)
+
+    head = f"{i}. " + (f"<b>{_esc(pct)}</b>" if rich else pct)
+    if name:
+        head += " · " + (_esc(name) if rich else name)
+
+    lines = [head]
+    if code:
+        inn = "INN" if lang == "uz" else "ИНН"
+        lines.append(f"↳ <i>{inn} {_esc(code)}</i>" if rich else f"↳ {inn} {code}")
+    return lines
+
+
+def _card_block(tool: str, rows: list, meta: dict, lang: str, rich: bool) -> list[str]:
+    emoji, title, sub = HEADERS[tool][lang]
+    head = f"{emoji} <b>{_esc(title)}</b>" if rich else f"{emoji} {title}"
+
+    fill = _SafeDict({"count": meta.get("count"), "min_deals": meta.get("min_deals")})
+    sub_txt = sub.format_map(fill) if (meta.get("count") is not None or meta.get("min_deals") is not None) else ""
+    if sub_txt:
+        head += " · " + (_esc(sub_txt) if rich else sub_txt)
+
+    out = [head]
+    hint = HINTS.get(tool, {}).get(lang)
+    if hint:
+        tail = f"{hint} · top {len(rows)}"
+        out.append(f"<i>{_esc(tail)}</i>" if rich else tail)
+    out.append("")
+
+    for i, r in enumerate(rows, 1):
+        if tool == "anomalies":
+            out.extend(_anomaly_card(i, r, lang, rich))
+        else:
+            out.extend(_risky_card(i, r, lang, rich))
         out.append("")
-        out.append(f"📎 {UNITS[lang]['src']}: " + ", ".join(sources))
+
+    while out and out[-1] == "":
+        out.pop()
+    return out
+
+
+def format_result(tool: str, result: dict, lang: str, rich: bool = False) -> str:
+    """Natijani matnga aylantiradi.
+
+    rich=True — Telegram HTML teglari bilan (bot parse_mode="HTML" yuboradi).
+    rich=False — oddiy matn (cli.py, loglar, testlar).
+    """
+    rows = result.get("rows") or []
+    if not rows:
+        return NO_DATA[lang]
+
+    meta = result.get("meta") or {}
+    if tool in CARD_TOOLS:
+        out = _card_block(tool, rows, meta, lang, rich)
+    else:
+        out = _list_block(tool, rows, result, lang, rich)
+
+    sources = meta.get("sources")
+    if sources:
+        src = ", ".join(_esc(s) if rich else str(s) for s in sources)
+        line = f"📎 {UNITS[lang]['src']}: {src}"
+        out += ["", f"<i>{line}</i>" if rich else line]
     return "\n".join(out)

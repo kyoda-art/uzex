@@ -180,13 +180,20 @@ def _split(text: str, limit: int = 4000):
     return parts
 
 
-async def _send(target, text: str, lang: str, markup=None):
-    """target: Update (xabar uchun) yoki Message (tugma javobi uchun)."""
+async def _send(target, text: str, lang: str, markup=None, rich: bool = False):
+    """target: Update (xabar uchun) yoki Message (tugma javobi uchun).
+
+    rich=True — matnda Telegram HTML teglari bor, parse_mode="HTML" bilan yuboriladi.
+    """
     msg = target if hasattr(target, "reply_text") else target.message
     parts = _split(text)
     for i, part in enumerate(parts):
         last = i == len(parts) - 1
-        await msg.reply_text(part, reply_markup=(markup if (last and markup) else _menu(lang)))
+        await msg.reply_text(
+            part,
+            parse_mode="HTML" if rich else None,
+            reply_markup=(markup if (last and markup) else _menu(lang)),
+        )
 
 
 def _year_markup(ds, tool: str | None, selected, lang: str):
@@ -258,13 +265,13 @@ async def run_module(update: Update, context: ContextTypes.DEFAULT_TYPE, module:
     blocks, last_tool, last_args = [], None, {}
     for tool, args in MODULE_PLAN[module]:
         result = await asyncio.to_thread(run_tool, ds, tool, args)
-        blocks.append(format_result(tool, result, lang))
+        blocks.append(format_result(tool, result, lang, rich=True))
         last_tool, last_args = tool, args
     markup = None
     if len(MODULE_PLAN[module]) == 1:
         context.user_data["last"] = {"tool": last_tool, "args": last_args}
         markup = _year_markup(ds, last_tool, last_args.get("year"), lang)
-    await _send(update, "\n\n".join(blocks), lang, markup=markup)
+    await _send(update, "\n\n".join(blocks), lang, markup=markup, rich=True)
 
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -319,10 +326,17 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if res["tool"]:
         context.user_data["last"] = {"tool": res["tool"], "args": res["args"]}
 
+    # Vosita natijasi bo'lsa — kartali, chiroyli (HTML) ko'rinishda qayta yig'amiz.
+    # Suhbat tarixiga esa oddiy matn yoziladi (res["text"]).
+    shown = res["text"]
+    rich = bool(res["tool"] and res["result"])
+    if rich:
+        shown = format_result(res["tool"], res["result"], res["lang"], rich=True)
+
     # CSV fayl so'ralgan bo'lsa
     if _wants_file(text) and res["result"] and res["result"].get("rows"):
         data = to_csv_bytes(res["result"])
-        await _send(update, res["text"], res["lang"], markup=None)
+        await _send(update, shown, res["lang"], markup=None, rich=rich)
         await update.message.reply_document(
             document=io.BytesIO(data), filename=f"{res['tool']}.csv",
             caption=TEXT[res["lang"]]["file_caption"],
@@ -330,7 +344,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     markup = _year_markup(ds, res["tool"], res["args"].get("year"), res["lang"])
-    await _send(update, res["text"], res["lang"], markup=markup)
+    await _send(update, shown, res["lang"], markup=markup, rich=rich)
     await _send_chart(update.message, ds, res, res["lang"])
 
 
@@ -349,8 +363,8 @@ async def on_year(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args["year"] = year
     result = await asyncio.to_thread(run_tool, ds, last["tool"], args)
     context.user_data["last"] = {"tool": last["tool"], "args": args}
-    text = format_result(last["tool"], result, lang)
-    await _send(query.message, text, lang, markup=_year_markup(ds, last["tool"], year, lang))
+    text = format_result(last["tool"], result, lang, rich=True)
+    await _send(query.message, text, lang, markup=_year_markup(ds, last["tool"], year, lang), rich=True)
     await _send_chart(query.message, ds, {"tool": last["tool"], "result": result}, lang)
 
 
