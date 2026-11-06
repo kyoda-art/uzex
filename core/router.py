@@ -59,28 +59,11 @@ def _clean(args: dict, ds: Dataset) -> dict:
     return out
 
 
-def _sources(tool: str, args: dict) -> list:
-    if tool == "usd_rate":
-        return ["usd_rates.csv"]
-    year = args.get("year")
-    files = [f"deals_{year}.csv" if year else "deals_2022–2026.csv", "usd_rates.csv"]
-    if tool in ("top_sellers", "top_buyers", "trade_network", "risky_sellers"):
-        files.append("participants.csv")
-    if tool == "top_brokers":
-        files.append("brokers.csv")
-    if tool in ("price_trend", "anomalies"):
-        files.append("contracts.csv")
-    return files
-
-
 def run_tool(ds: Dataset, tool: str, args: dict) -> dict:
     fn = TOOLS[tool]["fn"]
     allowed = inspect.signature(fn).parameters
-    clean = _clean(args or {}, ds)
-    kwargs = {k: v for k, v in clean.items() if k in allowed and k != "ds"}
-    result = fn(ds, **kwargs)
-    result.setdefault("meta", {})["sources"] = _sources(tool, clean)
-    return result
+    kwargs = {k: v for k, v in _clean(args or {}, ds).items() if k in allowed and k != "ds"}
+    return fn(ds, **kwargs)
 
 
 # ---------- Qoidalarga asoslangan yo'naltirish ----------
@@ -209,81 +192,19 @@ def make_llm():
     return genai.Client(api_key=key)
 
 
-CHAT_SYSTEM = """Sen UZEX birja bo'yicha AI-agentsan, lekin foydalanuvchining istalgan savoliga to'liq javob berasan:
-oddiy suhbat, umumiy bilim, maslahat, tushuntirish. Foydalanuvchi qaysi tilda yozsa, o'sha tilda javob ber
-(o'zbekcha lotin, kirill yoki ruscha). Javobni aniq va tushunarli yoz.
-Agar savol UZEX bitimlarining aniq raqamlari haqida bo'lsa-yu, bu ma'lumot sening bazangda bo'lmasa, buni
-ochiq ayt, umumiy tushuncha ber va aniq raqam so'ralsa, savolni yanada aniq yozishni tavsiya qil.
-Birja raqamlarini o'zing o'ylab topma."""
-
-CHAT_FALLBACK = {
-    "uz": "Hozircha bu savolga javob bera olmayman. Birja bo'yicha savol bering, masalan: "
-          "\"Umumiy statistika 2025\" yoki \"Dollar kursi 30.10.2026\".",
-    "ru": "Пока не могу ответить на этот вопрос. Задайте вопрос о бирже, например: "
-          "\"Общая статистика 2025\" или \"Курс доллара 30.10.2026\".",
-}
-
-AI_OFF = {
-    "uz": "🔌 AI hozircha ulanmagan (GEMINI_API_KEY sozlanmagan). Birja savollari ishlayveradi.",
-    "ru": "🔌 AI пока не подключён (GEMINI_API_KEY не задан). Вопросы по бирже работают.",
-}
-
-AI_ERR = {
-    "uz": "⚠️ AI hozir javob bera olmadi. Birozdan keyin qayta urinib ko'ring.",
-    "ru": "⚠️ AI сейчас не смог ответить. Попробуйте чуть позже.",
-}
-
-
-def chat_reply(llm, text: str, lang: str, history=None) -> str:
-    """Oddiy suhbat javobi (Gemini). Raqamlar uchun bu funksiya ishlatilmaydi."""
-    from google.genai import types
-
-    transcript = ""
-    for role, msg in (history or [])[-8:]:
-        transcript += f"{'Foydalanuvchi' if role == 'user' else 'Agent'}: {msg}\n"
-    prompt = transcript + f"Foydalanuvchi: {text}\nAgent:"
-    resp = llm.models.generate_content(
-        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-        contents=prompt,
-        config=types.GenerateContentConfig(system_instruction=CHAT_SYSTEM, temperature=0.7),
-    )
-    out = (resp.text or "").strip()
-    return out or AI_ERR[lang]
-
-
-def chat_enabled() -> bool:
-    return os.getenv("CHAT_ENABLED", "1").lower() not in ("0", "false", "no", "off")
-
-
-def resolve(ds: Dataset, text: str, llm=None):
-    """Savolni (vosita, parametrlar) juftligiga aylantiradi. Gemini xato bersa qoidalarga o'tadi."""
+def answer(ds: Dataset, text: str, llm=None) -> str:
+    lang = detect_lang(text)
+    tool, args = None, {}
     if llm is not None:
         try:
-            return route_llm(llm, text, ds)
+            tool, args = route_llm(llm, text, ds)
         except Exception:
             log.exception("Gemini yo'naltirishda xato, qoidalar ishlatiladi")
-    return route_rules(text, ds)
+            tool, args = route_rules(text, ds)
+    else:
+        tool, args = route_rules(text, ds)
 
-
-def run_question(ds: Dataset, text: str, llm=None, history=None) -> dict:
-    """Bitta savolni to'liq qayta ishlaydi: matn, vosita, parametrlar va natija."""
-    lang = detect_lang(text)
-    tool, args = resolve(ds, text, llm)
-    if tool:
-        result = run_tool(ds, tool, args)
-        return {"text": format_result(tool, result, lang), "tool": tool, "args": args,
-                "result": result, "lang": lang}
-    if chat_enabled():
-        if llm is None:
-            return {"text": AI_OFF[lang], "tool": None, "args": {}, "result": None, "lang": lang}
-        try:
-            reply = chat_reply(llm, text, lang, history)
-            return {"text": reply, "tool": None, "args": {}, "result": None, "lang": lang}
-        except Exception:
-            log.exception("Suhbat javobida xato")
-            return {"text": AI_ERR[lang], "tool": None, "args": {}, "result": None, "lang": lang}
-    return {"text": CHAT_FALLBACK[lang], "tool": None, "args": {}, "result": None, "lang": lang}
-
-
-def answer(ds: Dataset, text: str, llm=None, history=None) -> str:
-    return run_question(ds, text, llm, history)["text"]
+    if not tool:
+        return NO_DATA[lang]
+    result = run_tool(ds, tool, args)
+    return format_result(tool, result, lang)

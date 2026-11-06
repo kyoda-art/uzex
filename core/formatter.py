@@ -7,8 +7,8 @@ import re
 NO_DATA = {"uz": "Ma'lumotda javob yo'q", "ru": "Ответа нет в данных"}
 
 UNITS = {
-    "uz": {"mlrd": "mlrd so'm", "som": "so'm", "rate": "so'm/USD", "dev": "medianadan", "src": "Manba"},
-    "ru": {"mlrd": "млрд сум", "som": "сум", "rate": "сум/USD", "dev": "от медианы", "src": "Источник"},
+    "uz": {"mlrd": "mlrd so'm", "som": "so'm", "rate": "so'm/USD"},
+    "ru": {"mlrd": "млрд сум", "som": "сум", "rate": "сум/USD"},
 }
 
 LABELS = {
@@ -75,8 +75,6 @@ def fmt_value(v, vtype: str, cur: str | None, lang: str) -> str:
         return f"{v * 100:.1f}%"
     if vtype == "ratio":
         return f"x{v:.2f}"
-    if vtype == "dev":
-        return f"{v * 100:+.0f}% {u['dev']}"
     if vtype == "rate":
         return _sp(f"{v:,.2f}") + f" {u['rate']}"
     if vtype == "price":
@@ -85,17 +83,13 @@ def fmt_value(v, vtype: str, cur: str | None, lang: str) -> str:
     return str(v)
 
 
-def title_text(tool: str, result: dict, lang: str) -> str:
-    meta = _SafeDict(result.get("meta") or {})
-    meta.setdefault("year_s", "")
-    return TITLES[tool][lang].format_map(meta)
-
-
 def format_result(tool: str, result: dict, lang: str) -> str:
     rows = result.get("rows") or []
     if not rows:
         return NO_DATA[lang]
-    title = title_text(tool, result, lang)
+    meta = _SafeDict(result.get("meta") or {})
+    meta.setdefault("year_s", "")
+    title = TITLES[tool][lang].format_map(meta)
 
     out = [title, ""]
     for i, r in enumerate(rows, 1):
@@ -111,8 +105,4 @@ def format_result(tool: str, result: dict, lang: str) -> str:
         if r.get("tag"):
             line += f" ({LABELS[lang].get(r['tag'], r['tag'])})"
         out.append(line)
-    sources = (result.get("meta") or {}).get("sources")
-    if sources:
-        out.append("")
-        out.append(f"📎 {UNITS[lang]['src']}: " + ", ".join(sources))
     return "\n".join(out)
