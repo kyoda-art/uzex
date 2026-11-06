@@ -1,0 +1,14 @@
+# Maxfiy sozlamalar — hech qachon commit qilinmasin
+.env
+.env.*
+!.env.example
+
+# Katta ma'lumotlar (GitHub Release yoki DATA_URL orqali yuklanadi)
+data/
+*.zip
+
+# Python artefaktlari
+__pycache__/
+*.pyc
+.venv/
+venv/
