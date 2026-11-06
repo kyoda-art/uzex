@@ -266,6 +266,16 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _send(update, TEXT[lang]["welcome"], lang)
 
 
+async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Suhbat tarixini tozalaydi — bot eski kontekstga qaytib ketmasligi uchun."""
+    context.user_data.pop("history", None)
+    context.user_data.pop("last", None)
+    lang = _ui(context)
+    text = ("🧹 Suhbat tarixi tozalandi. Yangi savoldan boshlaymiz." if lang == "uz"
+            else "🧹 История диалога очищена. Начнём с нового вопроса.")
+    await _send(update, text, lang)
+
+
 async def run_module(update: Update, context: ContextTypes.DEFAULT_TYPE, module: str, year: int | None = None):
     """Menyudagi bo'lim: bir yoki bir nechta vositani ishlatib, matn + grafik yuboradi.
 
@@ -340,8 +350,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     history.append(("user", text))
-    history.append(("agent", res["text"]))
-    del history[:-10]
+    history.append(("agent", str(res["text"])[:600]))
+    del history[:-20]  # oxirgi 10 ta almashinuv saqlanadi
 
     if res["tool"]:
         context.user_data["last"] = {"tool": res["tool"], "args": res["args"]}
@@ -424,6 +434,7 @@ def main():
 
     app.add_handler(CommandHandler(["start", "menu"], cmd_start))
     app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler(["reset", "clear"], cmd_reset))
     app.add_handler(CallbackQueryHandler(on_year, pattern=r"^yr:\d{4}$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 

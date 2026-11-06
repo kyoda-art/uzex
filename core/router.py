@@ -184,16 +184,29 @@ Vositalar:
 {tools}
 
 Args: year = 2022..2026 yoki null; n = 1..20; product = mahsulot nomi yoki kalit so'z; date = DD.MM.YYYY yoki null; months = 1..12.
+"""
 
-Savol: """
+
+def _transcript(history=None, limit: int = 10) -> str:
+    """Oldingi suhbatni matnga aylantiradi (model kontekstni ko'rishi uchun)."""
+    lines = []
+    for role, msg in (history or [])[-limit:]:
+        who = "Foydalanuvchi" if role == "user" else "Agent"
+        lines.append(f"{who}: {str(msg)[:600]}")
+    return "\n".join(lines)
 
 
-def route_llm(client, text: str, ds: Dataset):
+def route_llm(client, text: str, ds: Dataset, history=None):
     """Bitta so'rov: vosita tanlash YOKI to'liq javob. Qaytaradi: (tool, args, reply)."""
     from google.genai import types  # import lazily: kutubxona faqat kalit bo'lganda kerak
 
     tools_txt = "\n".join(f"- {name}: {meta['doc']}" for name, meta in TOOLS.items())
-    prompt = ROUTER_PROMPT.replace("{tools}", tools_txt) + text
+    parts = [ROUTER_PROMPT.replace("{tools}", tools_txt)]
+    tr = _transcript(history)
+    if tr:
+        parts.append("Oldingi suhbat:\n" + tr)
+    parts.append("Savol: " + text)
+    prompt = "\n\n".join(parts)
     resp = client.models.generate_content(
         model=os.getenv("GEMINI_MODEL", DEFAULT_MODEL),
         contents=prompt,
@@ -229,6 +242,9 @@ def make_llm():
 CHAT_SYSTEM = """Sen UZEX birja bo'yicha AI-agentsan, lekin foydalanuvchining istalgan savoliga to'liq javob berasan:
 oddiy suhbat, umumiy bilim, maslahat, tushuntirish. Foydalanuvchi qaysi tilda yozsa, o'sha tilda javob ber
 (o'zbekcha lotin, kirill yoki ruscha). Javobni aniq va tushunarli yoz.
+Agar "Oldingi suhbat" berilgan bo'lsa — uni albatta hisobga ol va davom ettir: "u-chi?", "yana", "2025-chi",
+"narxi qancha edi?" kabi qisqa savollar oldingi xabarlarga bog'liq. Foydalanuvchi nimanidir nazarda tutayotgan
+bo'lsa, oldingi gapdan tushunib javob ber, har safar noldan boshlamagin.
 Agar savol UZEX bitimlarining aniq raqamlari haqida bo'lsa-yu, bu ma'lumot sening bazangda bo'lmasa, buni
 ochiq ayt, umumiy tushuncha ber va aniq raqam so'ralsa, savolni yanada aniq yozishni tavsiya qil.
 Birja raqamlarini o'zing o'ylab topma."""
@@ -252,13 +268,15 @@ AI_ERR = {
 
 
 def chat_reply(llm, text: str, lang: str, history=None) -> str:
-    """Oddiy suhbat javobi (Gemini). Raqamlar uchun bu funksiya ishlatilmaydi."""
+    """Oddiy suhbat javobi (Gemini). Raqamlar uchun bu funksiya ishlatilmaydi.
+
+    history beriladi — shunda model oldingi suhbatni davom ettiradi, har safar
+    noldan boshlab "unitib" qo'ymaydi.
+    """
     from google.genai import types
 
-    transcript = ""
-    for role, msg in (history or [])[-8:]:
-        transcript += f"{'Foydalanuvchi' if role == 'user' else 'Agent'}: {msg}\n"
-    prompt = transcript + f"Foydalanuvchi: {text}\nAgent:"
+    transcript = _transcript(history, limit=12)
+    prompt = (transcript + "\n" if transcript else "") + f"Foydalanuvchi: {text}\nAgent:"
     resp = llm.models.generate_content(
         model=os.getenv("GEMINI_MODEL", DEFAULT_MODEL),
         contents=prompt,
@@ -272,7 +290,7 @@ def chat_enabled() -> bool:
     return os.getenv("CHAT_ENABLED", "1").lower() not in ("0", "false", "no", "off")
 
 
-def resolve(ds: Dataset, text: str, llm=None):
+def resolve(ds: Dataset, text: str, llm=None, history=None):
     """Qoidalar avval ishlaydi (Gemini kvotasini tejaydi). Topilmasa bitta Gemini so'rovi.
     Qaytaradi: (tool, args, reply). reply — Gemini to'liq javobi (vosita bo'lmaganda)."""
     tool, args = route_rules(text, ds)
@@ -281,7 +299,7 @@ def resolve(ds: Dataset, text: str, llm=None):
     if llm is None:
         return None, {}, None
     try:
-        return route_llm(llm, text, ds)
+        return route_llm(llm, text, ds, history)
     except Exception:
         log.exception("Gemini so'rovida xato")
         return None, {}, "__ERROR__"  # takroriy so'rov yubormaslik uchun belgi
@@ -293,7 +311,7 @@ def run_question(ds: Dataset, text: str, llm=None, history=None) -> dict:
     low = text.lower()
     if any(c in low for c in OTHER_CURRENCY) and not any(w in low for w in DOLLAR_WORDS) and "kurs" in low:
         return {"text": UNSUPPORTED[lang], "tool": None, "args": {}, "result": None, "lang": lang}
-    tool, args, reply = resolve(ds, text, llm)
+    tool, args, reply = resolve(ds, text, llm, history)
     log.info("savol=%r -> vosita=%s args=%s", text[:120], tool, args)
     if tool:
         result = run_tool(ds, tool, args)
