@@ -53,7 +53,7 @@ def ensure_data(data_dir: str = DATA_DIR) -> None:
     url = os.getenv("DATA_URL")
     if not url:
         raise FileNotFoundError(f"Ma'lumot topilmadi: {data_dir}. DATA_URL o'rnating yoki fayllarni joylang.")
-    dest_parent = os.path.dirname(os.path.dirname(os.path.abspath(data_dir)))
+    dest_parent = os.path.dirname(os.path.abspath(data_dir))  # zip ichida uzex_spot_data/ papkasi bor
     os.makedirs(dest_parent, exist_ok=True)
     tmp = os.path.join(dest_parent, "_data.zip")
     log.info("Ma'lumot yuklab olinmoqda...")
