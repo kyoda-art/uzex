@@ -209,17 +209,28 @@ def make_llm():
     return genai.Client(api_key=key)
 
 
-CHAT_SYSTEM = """Sen UZEX birja bo'yicha AI-agentsan va oddiy suhbat ham qila olasan.
-Foydalanuvchi bilan do'stona, qisqa va aniq gaplash. Foydalanuvchi qaysi tilda yozsa, o'sha tilda javob ber
-(o'zbekcha lotin, kirill yoki ruscha).
-Birja raqamlari, narxlar, hajmlar va sotuvchilar haqida o'zing raqam o'ylab topma. Agar foydalanuvchi shunday
-ma'lumot so'rasa, aniq savol berishini so'ra (masalan: "2025 yilda eng yirik sotuvchilar" yoki "paxta narxi 2026")."""
+CHAT_SYSTEM = """Sen UZEX birja bo'yicha AI-agentsan, lekin foydalanuvchining istalgan savoliga to'liq javob berasan:
+oddiy suhbat, umumiy bilim, maslahat, tushuntirish. Foydalanuvchi qaysi tilda yozsa, o'sha tilda javob ber
+(o'zbekcha lotin, kirill yoki ruscha). Javobni aniq va tushunarli yoz.
+Agar savol UZEX bitimlarining aniq raqamlari haqida bo'lsa-yu, bu ma'lumot sening bazangda bo'lmasa, buni
+ochiq ayt, umumiy tushuncha ber va aniq raqam so'ralsa, savolni yanada aniq yozishni tavsiya qil.
+Birja raqamlarini o'zing o'ylab topma."""
 
 CHAT_FALLBACK = {
     "uz": "Hozircha bu savolga javob bera olmayman. Birja bo'yicha savol bering, masalan: "
           "\"Umumiy statistika 2025\" yoki \"Dollar kursi 30.10.2026\".",
     "ru": "Пока не могу ответить на этот вопрос. Задайте вопрос о бирже, например: "
           "\"Общая статистика 2025\" или \"Курс доллара 30.10.2026\".",
+}
+
+AI_OFF = {
+    "uz": "🔌 AI hozircha ulanmagan (GEMINI_API_KEY sozlanmagan). Birja savollari ishlayveradi.",
+    "ru": "🔌 AI пока не подключён (GEMINI_API_KEY не задан). Вопросы по бирже работают.",
+}
+
+AI_ERR = {
+    "uz": "⚠️ AI hozir javob bera olmadi. Birozdan keyin qayta urinib ko'ring.",
+    "ru": "⚠️ AI сейчас не смог ответить. Попробуйте чуть позже.",
 }
 
 
@@ -237,7 +248,7 @@ def chat_reply(llm, text: str, lang: str, history=None) -> str:
         config=types.GenerateContentConfig(system_instruction=CHAT_SYSTEM, temperature=0.7),
     )
     out = (resp.text or "").strip()
-    return out or CHAT_FALLBACK[lang]
+    return out or AI_ERR[lang]
 
 
 def chat_enabled() -> bool:
@@ -262,12 +273,15 @@ def run_question(ds: Dataset, text: str, llm=None, history=None) -> dict:
         result = run_tool(ds, tool, args)
         return {"text": format_result(tool, result, lang), "tool": tool, "args": args,
                 "result": result, "lang": lang}
-    if chat_enabled() and llm is not None:
+    if chat_enabled():
+        if llm is None:
+            return {"text": AI_OFF[lang], "tool": None, "args": {}, "result": None, "lang": lang}
         try:
             reply = chat_reply(llm, text, lang, history)
             return {"text": reply, "tool": None, "args": {}, "result": None, "lang": lang}
         except Exception:
             log.exception("Suhbat javobida xato")
+            return {"text": AI_ERR[lang], "tool": None, "args": {}, "result": None, "lang": lang}
     return {"text": CHAT_FALLBACK[lang], "tool": None, "args": {}, "result": None, "lang": lang}
 
 

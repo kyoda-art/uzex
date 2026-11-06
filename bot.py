@@ -10,6 +10,7 @@ import threading
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     ReplyKeyboardMarkup,
     Update,
 )
@@ -27,7 +28,7 @@ from core.data import load
 from core.export import to_csv_bytes
 from core.formatter import detect_lang, format_result
 from core.health import start_health_server
-from core.router import make_llm, run_question, run_tool
+from core.router import chat_enabled, make_llm, run_question, run_tool
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO)
 log = logging.getLogger("uzex_bot")
@@ -57,6 +58,22 @@ ACTION_BY_LABEL = {
     "🔄 Asosiy menyu": "menu",
     "🔄 Главное меню": "menu",
 }
+
+# Tugma ranglari: Telegram Bot API "style" maydoni (primary = ko'k, success = yashil, danger = qizil)
+BUTTON_STYLE = {
+    "📊 Market Intelligence": "primary",
+    "🔎 Anomaly Hunter": "danger",
+    "🔮 Future Vision": "success",
+    "🌐 Trade Network": "primary",
+    "📑 Smart Reports": "success",
+    "🧠 NEXUS AI": "primary",
+}
+
+
+def _kb(label: str) -> KeyboardButton:
+    style = BUTTON_STYLE.get(label)
+    return KeyboardButton(label, api_kwargs={"style": style} if style else None)
+
 
 MODULE_PLAN = {
     "market": [("summary", {})],
@@ -139,7 +156,8 @@ def _ui(context: ContextTypes.DEFAULT_TYPE) -> str:
 
 
 def _menu(lang: str) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(MENUS[lang], resize_keyboard=True)
+    rows = [[_kb(label) for label in row] for row in MENUS[lang]]
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
 def _split(text: str, limit: int = 4000):
@@ -169,7 +187,8 @@ def _prev_markup(ds, tool: str | None, args: dict, lang: str):
         return None
     if args["year"] - 1 not in ds.years:
         return None
-    return InlineKeyboardMarkup([[InlineKeyboardButton(TEXT[lang]["prev_btn"], callback_data="prev")]])
+    btn = InlineKeyboardButton(TEXT[lang]["prev_btn"], callback_data="prev", api_kwargs={"style": "success"})
+    return InlineKeyboardMarkup([[btn]])
 
 
 def _wants_file(text: str) -> bool:
@@ -188,6 +207,28 @@ async def _send_chart(update_or_msg, ds, res: dict, lang: str):
         return
     if png:
         await update_or_msg.reply_photo(photo=io.BytesIO(png))
+
+
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Holatni ko'rsatadi: AI ulanganmi, ma'lumot yuklanganmi."""
+    lang = _ui(context)
+    ds = context.application.bot_data.get("ds")
+    llm = context.application.bot_data.get("llm")
+    if lang == "ru":
+        text = (
+            "🩺 Статус\n\n"
+            f"AI (Gemini): {'подключён ✅' if llm else 'не подключён ❌ (нет GEMINI_API_KEY)'}\n"
+            f"Данные биржи: {'загружены ✅ ' + format(len(ds.deals), ',') + ' сделок' if ds else 'загружаются ⏳'}\n"
+            f"Свободный чат: {'включён' if chat_enabled() else 'выключен'}"
+        )
+    else:
+        text = (
+            "🩺 Holat\n\n"
+            f"AI (Gemini): {'ulangan ✅' if llm else 'ulanmagan ❌ (GEMINI_API_KEY yo‘q)'}\n"
+            f"Birja ma'lumoti: {'yuklangan ✅ ' + format(len(ds.deals), ',') + ' ta bitim' if ds else 'yuklanmoqda ⏳'}\n"
+            f"Suhbat rejimi: {'yoqilgan' if chat_enabled() else 'o‘chirilgan'}"
+        )
+    await _send(update, text, lang)
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -325,6 +366,7 @@ def main():
     threading.Thread(target=_load_data, daemon=True).start()
 
     app.add_handler(CommandHandler(["start", "menu"], cmd_start))
+    app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CallbackQueryHandler(on_prev, pattern="^prev$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 
