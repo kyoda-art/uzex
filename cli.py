@@ -3,11 +3,13 @@ import logging
 import time
 
 from core.data import load
+from core.env import load_env
 from core.router import answer, make_llm
 
 logging.basicConfig(level=logging.WARNING)
 
 if __name__ == "__main__":
+    load_env()
     t = time.time()
     ds = load()
     llm = make_llm()

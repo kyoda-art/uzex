@@ -89,7 +89,8 @@ def run_tool(ds: Dataset, tool: str, args: dict) -> dict:
 
 KW = {
     "anomaly": ["anomal", "аномал", "ayritab", "айритаб", "подозрит", "shubhali"],
-    "forecast": ["prognoz", "прогноз", "bashorat", "башорат", "forecast", "future", "kelajak", "будущ", "keyingi"],
+    "forecast": ["prognoz", "прогноз", "bashorat", "башорат", "forecast", "future", "kelajak",
+                 "будущ", "keyingi oy", "keyingi oylar", "kelgusi"],
     "risky": ["annul", "аннул", "bekor", "risk", "риск", "ishonchsiz"],
     "network": ["network", "tarmoq", "juftlik", "связ", "пары", "маршрут"],
     "usd": ["kurs", "курс", "usd"],
@@ -293,6 +294,7 @@ def run_question(ds: Dataset, text: str, llm=None, history=None) -> dict:
     if any(c in low for c in OTHER_CURRENCY) and not any(w in low for w in DOLLAR_WORDS) and "kurs" in low:
         return {"text": UNSUPPORTED[lang], "tool": None, "args": {}, "result": None, "lang": lang}
     tool, args, reply = resolve(ds, text, llm)
+    log.info("savol=%r -> vosita=%s args=%s", text[:120], tool, args)
     if tool:
         result = run_tool(ds, tool, args)
         return {"text": format_result(tool, result, lang), "tool": tool, "args": args,

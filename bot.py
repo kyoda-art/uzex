@@ -25,6 +25,7 @@ from telegram.ext import (
 
 from core.charts import make_chart
 from core.data import load
+from core.env import load_env
 from core.export import to_csv_bytes
 from core.formatter import detect_lang, format_result
 from core.health import start_health_server
@@ -400,6 +401,8 @@ async def _post_init(app: Application):
 
 
 def main():
+    # .env bo'lsa o'qiymiz (Windows muhit o'zgaruvchilari ustuvor qoladi)
+    load_env()
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         raise SystemExit("TELEGRAM_BOT_TOKEN o'rnatilmagan")
