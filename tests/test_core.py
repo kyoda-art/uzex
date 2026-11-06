@@ -132,6 +132,13 @@ def test_csv_export_has_bom_and_header():
     assert data.decode("utf-8-sig").splitlines()[0] == "nomi,kod,qiymat,turi,valyuta,izoh"
 
 
+def test_year_summary_chart_is_monthly_and_not_empty():
+    res = run_question(DS, "2025", None)
+    assert len(res["result"]["meta"]["monthly"]) == 12
+    png = make_chart(res["tool"], res["result"], res["lang"])
+    assert png is not None and len(png) > 15000
+
+
 def test_chart_is_png():
     res = run_question(DS, "Keyingi 3 oy prognoz", None)
     png = make_chart(res["tool"], res["result"], res["lang"])

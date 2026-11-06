@@ -20,7 +20,7 @@ def make_chart(tool: str, result: dict, lang: str) -> bytes | None:
     if tool not in CHART_TOOLS:
         return None
     rows = [r for r in (result.get("rows") or []) if r.get("value") is not None]
-    if not rows:
+    if not rows and not (result.get("meta") or {}).get("monthly"):
         return None
 
     import matplotlib
@@ -30,8 +30,15 @@ def make_chart(tool: str, result: dict, lang: str) -> bytes | None:
     fig, ax = plt.subplots(figsize=(8, 4.5), dpi=100)
     try:
         if tool == "summary":
-            yrs = [r for r in rows if r.get("label") is None and r.get("vtype") == "uzs"]
-            ax.bar([str(r["name"]) for r in yrs], [r["value"] / 1e9 for r in yrs], color="#2b6cb0")
+            monthly = (result.get("meta") or {}).get("monthly") or []
+            if monthly:  # yil tanlangan: oylik hajm
+                ax.bar([m for m, _ in monthly], [v / 1e9 for _, v in monthly], color="#2b6cb0")
+                plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+            else:  # yil tanlanmagan: yillik hajm
+                yrs = [r for r in rows if r.get("label") is None and r.get("vtype") == "uzs"]
+                if not yrs:
+                    return None
+                ax.bar([str(r["name"]) for r in yrs], [r["value"] / 1e9 for r in yrs], color="#2b6cb0")
             ax.set_ylabel("mlrd so'm" if lang == "uz" else "млрд сум")
         elif tool == "price_trend":
             ax.plot([str(r["name"]) for r in rows], [r["value"] for r in rows], marker="o", color="#2b6cb0")

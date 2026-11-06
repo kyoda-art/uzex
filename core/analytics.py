@@ -60,7 +60,9 @@ def summary(ds: Dataset, year=None):
     if year is None:
         by_year = ds.valid.groupby("year")["amount_uzs"].sum()
         rows += [_row(name=str(y), value=float(v), vtype="uzs") for y, v in by_year.items()]
-    return _res(rows, year_s=_ys(year))
+    monthly = df.groupby("month")["amount_uzs"].sum().sort_index()
+    series = [(str(m), float(v)) for m, v in monthly.items() if pd.notna(v)]
+    return _res(rows, year_s=_ys(year), monthly=series)
 
 
 def top_sellers(ds: Dataset, year=None, n=10):

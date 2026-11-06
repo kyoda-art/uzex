@@ -33,49 +33,49 @@ from core.router import chat_enabled, make_llm, run_question, run_tool
 logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO)
 log = logging.getLogger("uzex_bot")
 
-# Tugma matnlari: rangli doira emoji (hamma Telegram ilovasida ko'rinadi) + Bot API "style" (ko'k/yashil/qizil)
+# Tugma matnlari: emoji + Bot API "style" rangi (primary = ko'k, success = yashil, danger = qizil)
 MENUS = {
     "uz": [
-        ["🔵 Market Intelligence"], ["🔴 Anomaly Hunter"], ["🟢 Future Vision"], ["🔵 Trade Network"],
-        ["🟢 Smart Reports"], ["🟣 NEXUS AI"], ["🟠 Til / Language", "⚪ Yordam"], ["⚫ Asosiy menyu"],
+        ["📊 Market Intelligence"], ["🔎 Anomaly Hunter"], ["🔮 Future Vision"], ["🌐 Trade Network"],
+        ["📑 Smart Reports"], ["🧠 NEXUS AI"], ["🌍 Til / Language", "ℹ️ Yordam"], ["🔄 Asosiy menyu"],
     ],
     "ru": [
-        ["🔵 Market Intelligence"], ["🔴 Anomaly Hunter"], ["🟢 Future Vision"], ["🔵 Trade Network"],
-        ["🟢 Smart Reports"], ["🟣 NEXUS AI"], ["🟠 Язык / Til", "⚪ Помощь"], ["⚫ Главное меню"],
+        ["📊 Market Intelligence"], ["🔎 Anomaly Hunter"], ["🔮 Future Vision"], ["🌐 Trade Network"],
+        ["📑 Smart Reports"], ["🧠 NEXUS AI"], ["🌍 Язык / Til", "ℹ️ Помощь"], ["🔄 Главное меню"],
     ],
 }
 
 ACTION_BY_LABEL = {
-    "🔵 Market Intelligence": "market",
-    "🔴 Anomaly Hunter": "anomaly",
-    "🟢 Future Vision": "future",
-    "🔵 Trade Network": "trade",
-    "🟢 Smart Reports": "reports",
-    "🟣 NEXUS AI": "nexus",
-    "🟠 Til / Language": "lang",
-    "🟠 Язык / Til": "lang",
-    "⚪ Yordam": "help",
-    "⚪ Помощь": "help",
-    "⚫ Asosiy menyu": "menu",
-    "⚫ Главное меню": "menu",
+    "📊 Market Intelligence": "market",
+    "🔎 Anomaly Hunter": "anomaly",
+    "🔮 Future Vision": "future",
+    "🌐 Trade Network": "trade",
+    "📑 Smart Reports": "reports",
+    "🧠 NEXUS AI": "nexus",
+    "🌍 Til / Language": "lang",
+    "🌍 Язык / Til": "lang",
+    "ℹ️ Yordam": "help",
+    "ℹ️ Помощь": "help",
+    "🔄 Asosiy menyu": "menu",
+    "🔄 Главное меню": "menu",
 }
 # Emojisiz nom bo'yicha ham tanish (masalan foydalanuvchi "Market Intelligence" deb yozsa)
 ACTION_BY_NAME = {label.split(" ", 1)[1]: act for label, act in ACTION_BY_LABEL.items()}
 
 # Tugma ranglari: Telegram Bot API "style" (primary = ko'k, success = yashil, danger = qizil)
 BUTTON_STYLE = {
-    "🔵 Market Intelligence": "primary",
-    "🔴 Anomaly Hunter": "danger",
-    "🟢 Future Vision": "success",
-    "🔵 Trade Network": "primary",
-    "🟢 Smart Reports": "success",
-    "🟣 NEXUS AI": "primary",
-    "🟠 Til / Language": "primary",
-    "🟠 Язык / Til": "primary",
-    "⚪ Yordam": "success",
-    "⚪ Помощь": "success",
-    "⚫ Asosiy menyu": "danger",
-    "⚫ Главное меню": "danger",
+    "📊 Market Intelligence": "primary",
+    "🔎 Anomaly Hunter": "danger",
+    "🔮 Future Vision": "success",
+    "🌐 Trade Network": "primary",
+    "📑 Smart Reports": "success",
+    "🧠 NEXUS AI": "primary",
+    "🌍 Til / Language": "primary",
+    "🌍 Язык / Til": "primary",
+    "ℹ️ Yordam": "success",
+    "ℹ️ Помощь": "success",
+    "🔄 Asosiy menyu": "danger",
+    "🔄 Главное меню": "danger",
 }
 
 
