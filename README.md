@@ -14,14 +14,53 @@ UZEX birja bitimlari (2022–2026) bo'yicha savollarga **faqat ma'lumotga asosla
 | 🧠 NEXUS AI | Erkin savol rejimi |
 | 🌍 Til / Language | O'zbekcha ↔ Русский (menyu tili) |
 
+**Qo'shimcha imkoniyatlar:**
+- **Manba:** har javob oxirida ishlatilgan fayllar ko'rsatiladi (`📎 Manba: deals_2025.csv, usd_rates.csv`).
+- **Grafik:** narx dinamikasi, prognoz, yillik xulosa va TOP ro'yxatlar uchun rasm yuboriladi.
+- **CSV fayl:** so'rovda `excel`, `csv`, `fayl` so'zi bo'lsa natija CSV ko'rinishida yuboriladi (UTF-8 BOM, Excel'da to'g'ri ochiladi).
+- **Oldingi yil bilan solishtirish:** yil ko'rsatilgan javobda tugma bor, u bir yil oldingi natijani chiqaradi.
+- **Anomaliya:** narx shartnoma medianasidan necha foiz farq qilgani ko'rsatiladi (`-34% medianadan`).
+
 Erkin savollar ham ishlaydi: "Хлопок narxi 2025", "Dollar kursi 30.10.2026", "Eng yirik sotuvchilar 2026", "Keyingi 3 oy prognoz" va h.k.
 
 **Qoidalar:**
 - Raqamlar faqat CSV ma'lumotidan pandas bilan hisoblanadi — model raqam o'ylab topmaydi.
-- Ma'lumotda javob bo'lmasa: "Ma'lumotda javob yo'q".
+- Birja ma'lumotlari bo'lmagan savollarga: `CHAT_ENABLED=1` bo'lsa (standart) Gemini oddiy suhbat javobini beradi; `CHAT_ENABLED=0` bo'lsa yordam matni chiqadi. Hackathon qat'iy qoidasi uchun `CHAT_ENABLED=0` ni qo'ying.
 - Savol qaysi tilda bo'lsa, javob o'sha tilda (o'zbekcha yoki ruscha).
 - Eksport bitimlari (USD) bitim kunidagi kurs bo'yicha so'mga o'tkaziladi.
 - Annulyatsiyalangan va imzolanmagan bitimlar tahlildan chiqariladi.
+
+## Arxitektura
+
+```
+Telegram xabari
+   │
+   ▼
+bot.py  ── menyu tugmalari, CSV/grafik yuborish, "Oldingi yil" tugmasi
+   │
+   ▼
+core/router.py  ── savol → vosita + parametrlar
+   │   ├─ Gemini (GEMINI_API_KEY bo'lsa): JSON yo'naltirish
+   │   └─ kalit so'zlar (zaxira)
+   ▼
+core/analytics.py  ── pandas hisob-kitoblari (raqamlar faqat shu yerda)
+   │
+   ├─ core/formatter.py  → matn (uz/ru) + manba
+   ├─ core/charts.py     → PNG grafik
+   └─ core/export.py     → CSV fayl
+   ▲
+core/data.py  ── CSV yuklash, USD→so'm, annulyatsiyani chiqarish
+```
+
+Suhbat rejimi (`CHAT_ENABLED`) birja vositasi topilmagan savollarda Gemini bilan oddiy javob beradi.
+
+## Testlar
+
+```bash
+python tests/test_core.py
+```
+
+Testlar raqamlarni to'g'ridan-to'g'ri hisoblash bilan solishtiradi (yillar yig'indisi, USD kurs bo'yicha konvertatsiya, anomaliya chegarasi, narx oralig'i) va chiqish formatlarini tekshiradi.
 
 ## Tuzilishi
 
@@ -32,8 +71,13 @@ uzex_bot/
 ├── core/
 │   ├── data.py       # Ma'lumot yuklash (DATA_URL dan ham), tozalash
 │   ├── analytics.py  # Tahlil funksiyalari
+│   ├── charts.py     # Grafiklar (PNG)
+│   ├── export.py     # CSV eksport
+│   ├── health.py     # Monitor uchun HTTP javob
 │   ├── router.py     # Savol → vosita (Gemini yoki kalit so'zlar)
 │   └── formatter.py  # Javob matni (uz/ru)
+├── tests/test_core.py  # Asosiy tekshiruvlar
+├── DEMO.md           # Demo uchun savollar va kutilgan natijalar
 ├── render.yaml       # Render Blueprint
 ├── requirements.txt
 └── .env.example
@@ -83,4 +127,6 @@ Bot bepul **Web Service** sifatida ishlaydi (webhook rejimi). Render `PORT` va `
 
 - Mahsulot nomi bosh so'z bo'yicha moslanadi (masalan "хлопок", "paxta"). Boshqa sinonimlar uchun `core/analytics.py` dagi `UZ_SYNONYMS` ni kengaytiring yoki Gemini rejimidan foydalaning.
 - Prognoz taxminiy — kafolatlangan bashorat emas.
+- Grafiklar uchun matplotlib xotira qo'shadi (taxminan 60–80 MB). Bepul tarifda (512 MB) odatda yetadi, lekin bot uzoq ishlasa xotirani kuzating.
+- Gemini kaliti yoki kvotasi tugasa, bot kalit so'zlar rejimiga o'tadi va javob berishda davom etadi.
 - Ma'lumot 2026-yil 30-oktabrgacha.

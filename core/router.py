@@ -18,6 +18,8 @@ from .formatter import NO_DATA, detect_lang, format_result
 
 log = logging.getLogger(__name__)
 
+DEFAULT_MODEL = "gemini-2.5-flash-lite"
+
 TOOLS = {
     "summary": {"fn": A.summary, "doc": "overall market statistics: deal count, volume, executed deals, sellers and buyers counts; args: year"},
     "top_sellers": {"fn": A.top_sellers, "doc": "largest sellers by traded volume; args: year, n"},
@@ -59,11 +61,28 @@ def _clean(args: dict, ds: Dataset) -> dict:
     return out
 
 
+def _sources(tool: str, args: dict) -> list:
+    if tool == "usd_rate":
+        return ["usd_rates.csv"]
+    year = args.get("year")
+    files = [f"deals_{year}.csv" if year else "deals_2022–2026.csv", "usd_rates.csv"]
+    if tool in ("top_sellers", "top_buyers", "trade_network", "risky_sellers"):
+        files.append("participants.csv")
+    if tool == "top_brokers":
+        files.append("brokers.csv")
+    if tool in ("price_trend", "anomalies"):
+        files.append("contracts.csv")
+    return files
+
+
 def run_tool(ds: Dataset, tool: str, args: dict) -> dict:
     fn = TOOLS[tool]["fn"]
     allowed = inspect.signature(fn).parameters
-    kwargs = {k: v for k, v in _clean(args or {}, ds).items() if k in allowed and k != "ds"}
-    return fn(ds, **kwargs)
+    clean = _clean(args or {}, ds)
+    kwargs = {k: v for k, v in clean.items() if k in allowed and k != "ds"}
+    result = fn(ds, **kwargs)
+    result.setdefault("meta", {})["sources"] = _sources(tool, clean)
+    return result
 
 
 # ---------- Qoidalarga asoslangan yo'naltirish ----------
@@ -143,42 +162,45 @@ def route_rules(text: str, ds: Dataset):
 
 # ---------- Gemini yo'naltirish ----------
 
-ROUTER_PROMPT = """You route questions about the UZEX commodity exchange spot deals (2022-2026) to ONE analytics tool.
-Questions are in Uzbek (Latin or Cyrillic) or Russian.
-Reply with JSON only, no other text: {"tool": "<tool name or null>", "args": {...}}
-Use "tool": null when the question cannot be answered from exchange data (general knowledge, chit-chat, unrelated topics).
-Never invent numbers. Only choose a tool.
+ROUTER_PROMPT = """Savolga javob ber va uni vositaga yo'naltir. FAQAT JSON qaytar:
+{"tool": "<vosita nomi yoki null>", "args": {...}, "reply": "<matn>"}
+- Savol birja ma'lumotlari bo'yicha vosita bilan javob berilsa: tool va args ni to'ldir, reply ni "" qil.
+- Aks holda: tool ni null qil va reply ga foydalanuvchi savoliga TO'LIQ javobingni yoz (savol tilida).
+Birja raqamlarini o'zing o'ylab topma.
 
-Tools:
+Vositalar:
 {tools}
 
-Args: year = integer 2022..2026 or null; n = integer 1..20 (default 10); product = commodity name or keyword as written in the question; date = DD.MM.YYYY or null; months = integer 1..12.
+Args: year = 2022..2026 yoki null; n = 1..20; product = mahsulot nomi yoki kalit so'z; date = DD.MM.YYYY yoki null; months = 1..12.
 
-Question: """
+Savol: """
 
 
 def route_llm(client, text: str, ds: Dataset):
+    """Bitta so'rov: vosita tanlash YOKI to'liq javob. Qaytaradi: (tool, args, reply)."""
     from google.genai import types  # import lazily: kutubxona faqat kalit bo'lganda kerak
 
     tools_txt = "\n".join(f"- {name}: {meta['doc']}" for name, meta in TOOLS.items())
     prompt = ROUTER_PROMPT.replace("{tools}", tools_txt) + text
-    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     resp = client.models.generate_content(
-        model=model,
+        model=os.getenv("GEMINI_MODEL", DEFAULT_MODEL),
         contents=prompt,
-        config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0),
+        config=types.GenerateContentConfig(
+            system_instruction=CHAT_SYSTEM,
+            response_mime_type="application/json",
+            temperature=0.5,
+        ),
     )
     data = json.loads(resp.text or "{}")
     tool = data.get("tool")
-    if tool not in TOOLS:
-        return None, {}
-    args = data.get("args") or {}
-    if tool == "price_trend" and not args.get("product"):
-        return None, {}
-    return tool, args
+    reply = (data.get("reply") or "").strip() or None
+    if tool in TOOLS:
+        args = data.get("args") or {}
+        if tool == "price_trend" and not args.get("product"):
+            return None, {}, reply
+        return tool, args, None
+    return None, {}, reply
 
-
-# ---------- Asosiy kirish nuqtasi ----------
 
 def make_llm():
     key = os.getenv("GEMINI_API_KEY")
@@ -192,19 +214,88 @@ def make_llm():
     return genai.Client(api_key=key)
 
 
-def answer(ds: Dataset, text: str, llm=None) -> str:
-    lang = detect_lang(text)
-    tool, args = None, {}
-    if llm is not None:
-        try:
-            tool, args = route_llm(llm, text, ds)
-        except Exception:
-            log.exception("Gemini yo'naltirishda xato, qoidalar ishlatiladi")
-            tool, args = route_rules(text, ds)
-    else:
-        tool, args = route_rules(text, ds)
+CHAT_SYSTEM = """Sen UZEX birja bo'yicha AI-agentsan, lekin foydalanuvchining istalgan savoliga to'liq javob berasan:
+oddiy suhbat, umumiy bilim, maslahat, tushuntirish. Foydalanuvchi qaysi tilda yozsa, o'sha tilda javob ber
+(o'zbekcha lotin, kirill yoki ruscha). Javobni aniq va tushunarli yoz.
+Agar savol UZEX bitimlarining aniq raqamlari haqida bo'lsa-yu, bu ma'lumot sening bazangda bo'lmasa, buni
+ochiq ayt, umumiy tushuncha ber va aniq raqam so'ralsa, savolni yanada aniq yozishni tavsiya qil.
+Birja raqamlarini o'zing o'ylab topma."""
 
-    if not tool:
-        return NO_DATA[lang]
-    result = run_tool(ds, tool, args)
-    return format_result(tool, result, lang)
+CHAT_FALLBACK = {
+    "uz": "Hozircha bu savolga javob bera olmayman. Birja bo'yicha savol bering, masalan: "
+          "\"Umumiy statistika 2025\" yoki \"Dollar kursi 30.10.2026\".",
+    "ru": "Пока не могу ответить на этот вопрос. Задайте вопрос о бирже, например: "
+          "\"Общая статистика 2025\" или \"Курс доллара 30.10.2026\".",
+}
+
+AI_OFF = {
+    "uz": "🔌 AI hozircha ulanmagan (GEMINI_API_KEY sozlanmagan). Birja savollari ishlayveradi.",
+    "ru": "🔌 AI пока не подключён (GEMINI_API_KEY не задан). Вопросы по бирже работают.",
+}
+
+AI_ERR = {
+    "uz": "⚠️ AI hozir javob bera olmadi. Birozdan keyin qayta urinib ko'ring.",
+    "ru": "⚠️ AI сейчас не смог ответить. Попробуйте чуть позже.",
+}
+
+
+def chat_reply(llm, text: str, lang: str, history=None) -> str:
+    """Oddiy suhbat javobi (Gemini). Raqamlar uchun bu funksiya ishlatilmaydi."""
+    from google.genai import types
+
+    transcript = ""
+    for role, msg in (history or [])[-8:]:
+        transcript += f"{'Foydalanuvchi' if role == 'user' else 'Agent'}: {msg}\n"
+    prompt = transcript + f"Foydalanuvchi: {text}\nAgent:"
+    resp = llm.models.generate_content(
+        model=os.getenv("GEMINI_MODEL", DEFAULT_MODEL),
+        contents=prompt,
+        config=types.GenerateContentConfig(system_instruction=CHAT_SYSTEM, temperature=0.7),
+    )
+    out = (resp.text or "").strip()
+    return out or AI_ERR[lang]
+
+
+def chat_enabled() -> bool:
+    return os.getenv("CHAT_ENABLED", "1").lower() not in ("0", "false", "no", "off")
+
+
+def resolve(ds: Dataset, text: str, llm=None):
+    """Qoidalar avval ishlaydi (Gemini kvotasini tejaydi). Topilmasa bitta Gemini so'rovi.
+    Qaytaradi: (tool, args, reply). reply — Gemini to'liq javobi (vosita bo'lmaganda)."""
+    tool, args = route_rules(text, ds)
+    if tool:
+        return tool, args, None
+    if llm is None:
+        return None, {}, None
+    try:
+        return route_llm(llm, text, ds)
+    except Exception:
+        log.exception("Gemini so'rovida xato")
+        return None, {}, "__ERROR__"  # takroriy so'rov yubormaslik uchun belgi
+
+
+def run_question(ds: Dataset, text: str, llm=None, history=None) -> dict:
+    """Bitta savolni to'liq qayta ishlaydi: matn, vosita, parametrlar va natija."""
+    lang = detect_lang(text)
+    tool, args, reply = resolve(ds, text, llm)
+    if tool:
+        result = run_tool(ds, tool, args)
+        return {"text": format_result(tool, result, lang), "tool": tool, "args": args,
+                "result": result, "lang": lang}
+    if chat_enabled():
+        if llm is None:
+            return {"text": AI_OFF[lang], "tool": None, "args": {}, "result": None, "lang": lang}
+        if reply == "__ERROR__":
+            return {"text": AI_ERR[lang], "tool": None, "args": {}, "result": None, "lang": lang}
+        try:
+            out = reply or chat_reply(llm, text, lang, history)
+            return {"text": out, "tool": None, "args": {}, "result": None, "lang": lang}
+        except Exception:
+            log.exception("Suhbat javobida xato")
+            return {"text": AI_ERR[lang], "tool": None, "args": {}, "result": None, "lang": lang}
+    return {"text": CHAT_FALLBACK[lang], "tool": None, "args": {}, "result": None, "lang": lang}
+
+
+def answer(ds: Dataset, text: str, llm=None, history=None) -> str:
+    return run_question(ds, text, llm, history)["text"]
