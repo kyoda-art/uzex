@@ -30,6 +30,7 @@ from core.export import to_csv_bytes
 from core.formatter import detect_lang, format_result
 from core.health import start_health_server
 from core.router import chat_enabled, make_llm, run_question, run_tool
+from core.users import is_admin, record, summary
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO)
 log = logging.getLogger("uzex_bot")
@@ -263,7 +264,44 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = _ui(context)
+    record(update.effective_user)
     await _send(update, TEXT[lang]["welcome"], lang)
+
+
+async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Foydalanuvchi o'z id va username ini ko'radi (ADMIN_ID ni bilish uchun foydali)."""
+    u = update.effective_user
+    lang = _ui(context)
+    parts = [f"🆔 id: {u.id}"]
+    if u.username:
+        parts.append(f"🔗 @{u.username}")
+    name = " ".join(x for x in (u.first_name, u.last_name) if x)
+    if name:
+        parts.append(f"👤 {name}")
+    if is_admin(u.id):
+        parts.append("🔑 admin")
+    await _send(update, "\n".join(parts), lang)
+
+
+async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Foydalanuvchilar statistikasi. Batafsil ro'yxat faqat ADMIN_ID uchun."""
+    lang = _ui(context)
+    data = summary()
+    if lang == "uz":
+        head = f"👥 Foydalanuvchilar: {data['users']}\n💬 Xabarlar: {data['messages']}"
+    else:
+        head = f"👥 Пользователей: {data['users']}\n💬 Сообщений: {data['messages']}"
+
+    if not is_admin(update.effective_user.id):
+        await _send(update, head, lang)
+        return
+
+    rows = sorted(data["rows"].items(), key=lambda kv: -int(kv[1].get("messages", 0)))[:20]
+    lines = [head, ""]
+    for uid, r in rows:
+        who = f"@{r['username']}" if r.get("username") else (r.get("name") or "—")
+        lines.append(f"{who} · id {uid} · {r.get('messages', 0)} xabar · {str(r.get('last_seen', ''))[:16]}")
+    await _send(update, "\n".join(lines), lang)
 
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -308,6 +346,9 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
     if not text:
         return
+    record(update.effective_user)
+    u = update.effective_user
+    log.info("xabar: id=%s username=%s", u.id, u.username)
 
     action = ACTION_BY_LABEL.get(text) or ACTION_BY_NAME.get(text)
     if action:
@@ -435,6 +476,8 @@ def main():
     app.add_handler(CommandHandler(["start", "menu"], cmd_start))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler(["reset", "clear"], cmd_reset))
+    app.add_handler(CommandHandler("whoami", cmd_whoami))
+    app.add_handler(CommandHandler(["stats", "statistika"], cmd_stats))
     app.add_handler(CallbackQueryHandler(on_year, pattern=r"^yr:\d{4}$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 
