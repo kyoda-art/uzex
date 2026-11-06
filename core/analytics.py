@@ -160,8 +160,7 @@ def anomalies(ds: Dataset, year=None, n=10, ratio=1.3, min_deals=5):
     df["median"] = grp.transform("median")
     df["cnt"] = grp.transform("size")
     df["ratio"] = df["unit_price"] / df["median"]
-    lo = 2 - ratio  # simmetrik chegara: ratio=1.3 bo'lsa pastki chegara 0.7 (±30%)
-    flagged = df[(df["cnt"] >= min_deals) & ((df["ratio"] >= ratio) | (df["ratio"] <= lo))].copy()
+    flagged = df[(df["cnt"] >= min_deals) & ((df["ratio"] >= ratio) | (df["ratio"] <= 1 / ratio))].copy()
     total = len(flagged)
     if total == 0:
         return _res([], count=0)
@@ -170,8 +169,8 @@ def anomalies(ds: Dataset, year=None, n=10, ratio=1.3, min_deals=5):
     rows = [
         _row(
             name=f"{r.date:%d.%m.%Y} · №{r.deal_id} · {str(r.product)[:60]}",
-            value=float(r.ratio - 1),  # medianadan og'ish, masalan -0.34 = -34%
-            vtype="dev",
+            value=float(r.ratio),
+            vtype="ratio",
         )
         for r in top.itertuples()
     ]
