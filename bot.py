@@ -18,6 +18,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 from core.data import load
 from core.formatter import format_result, detect_lang
 from core.router import answer, make_llm, run_tool
+from core.health import start_health_server
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO)
 log = logging.getLogger("uzex_bot")
@@ -204,17 +205,23 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _send(update, reply, lang)
 
 
+async def _post_init(app: Application):
+    # Oldin webhook o'rnatilgan bo'lsa, polling ishlashi uchun uni o'chiramiz
+    await app.bot.delete_webhook(drop_pending_updates=True)
+    log.info("Webhook o'chirildi, polling boshlandi")
+
+
 def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         raise SystemExit("TELEGRAM_BOT_TOKEN o'rnatilmagan")
 
-    app = Application.builder().token(token).build()
+    app = Application.builder().token(token).post_init(_post_init).build()
     app.bot_data["ds"] = None
     app.bot_data["llm"] = make_llm()
     log.info("Gemini: %s", "ulangan" if app.bot_data["llm"] else "yo'q (qoidalar rejimi)")
 
-    # Ma'lumot fonda yuklanadi: port darhol ochiladi (Render port kutadi)
+    # Ma'lumot fonda yuklanadi
     def _load_data():
         try:
             log.info("Birja ma'lumotlari yuklanmoqda...")
@@ -224,25 +231,17 @@ def main():
             log.exception("Ma'lumot yuklanmadi")
 
     threading.Thread(target=_load_data, daemon=True).start()
+
     app.add_handler(CommandHandler(["start", "menu"], cmd_start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
-    # Render Web Service (bepul tarif): PORT va RENDER_EXTERNAL_URL avtomatik beriladi.
-    # Webhook rejimida Telegram xabarni servisga yuboradi, servis uxlagan bo'lsa ham uyg'onadi.
+
+    # Render'da (PORT bor): monitor uchun HTTP javob. Mahalliy ishda port kerak emas.
     port = os.environ.get("PORT")
-    base_url = os.environ.get("RENDER_EXTERNAL_URL")
-    if port and base_url:
-        log.info("Webhook rejimi: %s", base_url)
-        app.run_webhook(
-            listen="0.0.0.0",
-            port=int(port),
-            url_path=token,
-            webhook_url=f"{base_url}/{token}",
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
-        )
-    else:
-        log.info("Polling rejimi (mahalliy)")
-        app.run_polling()
+    if port:
+        start_health_server(int(port))
+
+    log.info("Polling rejimi boshlandi")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
