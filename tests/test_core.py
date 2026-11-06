@@ -85,6 +85,13 @@ def test_resolve_head_handles_declension_and_uzbek():
     assert A.resolve_head(DS, "ob-havo qanday") is None
 
 
+def test_bare_year_is_summary_of_that_year():
+    assert route_rules("2026", DS) == ("summary", {"year": 2026})
+    res = run_question(DS, "2025", None)
+    assert res["tool"] == "summary" and "2025" in res["text"]
+    assert route_rules("2030", DS)[0] is None
+
+
 def test_router_rules():
     assert route_rules("Umumiy statistika 2025", DS)[0] == "summary"
     assert route_rules("Dollar kursi 30.10.2026", DS) == ("usd_rate", {"date": "30.10.2026"})
@@ -99,6 +106,18 @@ def test_out_of_scope_gets_fallback_not_data():
 def test_answer_includes_source_footer():
     res = run_question(DS, "Umumiy statistika 2025", None)
     assert "deals_2025.csv" in res["text"]
+
+
+def test_other_currency_not_answered_with_dollar():
+    for q in ["rupiya kursi", "rubl kursi", "evro kursi"]:
+        r = run_question(DS, q, None)
+        assert r["tool"] is None and "USD" in r["text"], q
+
+
+def test_plain_kurs_is_not_dollar():
+    assert route_rules("ton kursi", DS)[0] is None
+    assert route_rules("dollar kursi", DS)[0] == "usd_rate"
+    assert route_rules("kurs 30.10.2026", DS)[0] == "usd_rate"
 
 
 def test_language_detection():
