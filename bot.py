@@ -50,6 +50,11 @@ ACTION_BY_LABEL = {
     "🔄 Главное меню": "menu",
 }
 
+GREETINGS = {
+    "salom", "assalomu alaykum", "assalomu alaykum!", "salom alik", "hello", "hi", "privet",
+    "привет", "здравствуйте", "здравствуй", "салом", "ассалому алейкум", "qalaysiz", "qalesiz",
+}
+
 # Har bir bo'lim qaysi vositalarni ishga tushirishi
 MODULE_PLAN = {
     "market": [("summary", {})],
@@ -178,6 +183,9 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     lang = detect_lang(text)  # javob savol tilida
+    if text.lower().strip(" !.,") in GREETINGS:
+        await _send(update, TEXT[lang]["welcome"], lang)
+        return
     ds = context.application.bot_data.get("ds")
     if ds is None:
         await _send(update, TEXT[lang]["loading"], lang)
